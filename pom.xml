@@ -75,6 +75,40 @@
                             <finalName>aeron-forex-subscriber</finalName>
                         </configuration>
                     </execution>
+                    <!-- Performance Publisher JAR -->
+                    <execution>
+                        <id>perf-publisher</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.xsyphon.aeron.AeronPerformancePublisher</mainClass>
+                                </transformer>
+                            </transformers>
+                            <finalName>aeron-performance-publisher</finalName>
+                        </configuration>
+                    </execution>
+                    <!-- Performance Subscriber JAR -->
+                    <execution>
+                        <id>perf-subscriber</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.xsyphon.aeron.AeronPerformanceSubscriber</mainClass>
+                                </transformer>
+                            </transformers>
+                            <finalName>aeron-performance-subscriber</finalName>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>
