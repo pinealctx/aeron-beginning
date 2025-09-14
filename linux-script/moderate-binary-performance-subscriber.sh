@@ -25,19 +25,18 @@ fi
 echo "📍 使用Java: $JAVA_BIN"
 echo "⚡ 使用中等优化配置启动订阅者..."
 echo "   - 进程优先级: -5 (中等优先级)"
-echo "   - 堆内存: 1GB"
-echo "   - GC: G1GC 5ms最大暂停"
-echo "   - 异步统计打印: 启用"
+echo "   - 堆内存: 2GB"
+echo "   - GC: G1GC 10ms最大暂停"
 echo "   - 参数: $@"
 echo ""
 
 nice -n -5 "$JAVA_BIN" \
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
-    -Xms1G -Xmx1G \
+    -Xms2G -Xmx2G \
     -XX:+UseG1GC \
-    -XX:MaxGCPauseMillis=5 \
+    -XX:MaxGCPauseMillis=10 \
     -XX:+UnlockExperimentalVMOptions \
     -XX:+UseLargePages \
     -Daeron.dir=/dev/shm/aeron \
     -cp xsyphon-aeron-forex.jar \
-    com.xsyphon.aeron.BinaryPerformanceSubscriber "$@"
+    com.xsyphon.aeron.BinaryPerformanceSubscriber -transport UDP "$@"

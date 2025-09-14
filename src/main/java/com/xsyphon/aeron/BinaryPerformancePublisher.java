@@ -8,28 +8,46 @@ import org.agrona.concurrent.UnsafeBuffer;
 /**
  * 高性能二进制消息发布者
  * 支持参数配置的消息大小和消息数量
+ * 支持UDP和IPC两种传输方式
  */
 public class BinaryPerformancePublisher {
-    private static final String CHANNEL = "aeron:udp?endpoint=localhost:20121";
+    // 传输方式枚举
+    public enum TransportType {
+        UDP("aeron:udp?endpoint=localhost:20121"),
+        IPC("aeron:ipc?term-length=1048576");
+        
+        private final String channel;
+        
+        TransportType(String channel) {
+            this.channel = channel;
+        }
+        
+        public String getChannel() {
+            return channel;
+        }
+    }
+    
     private static final int STREAM_ID = 1001;
     
     // 默认参数
     private static final int DEFAULT_MESSAGE_SIZE = 64;
     private static final int DEFAULT_MESSAGE_COUNT = 1_000_000;
+    private static final TransportType DEFAULT_TRANSPORT = TransportType.UDP;
 
     public static void main(String[] args) {
         // 解析命令行参数
         Config config = parseArgs(args);
         
         System.out.println("=== Aeron二进制高性能测试 - 发布者 ===");
-        System.out.println("Channel: " + CHANNEL);
+        System.out.println("传输方式: " + config.transportType.name());
+        System.out.println("Channel: " + config.transportType.getChannel());
         System.out.println("Stream ID: " + STREAM_ID);
         System.out.println("消息大小: " + config.messageSize + " bytes");
         System.out.println("测试消息数: " + config.messageCount);
         System.out.println();
 
         try (Aeron aeron = Aeron.connect();
-             Publication publication = aeron.addPublication(CHANNEL, STREAM_ID)) {
+             Publication publication = aeron.addPublication(config.transportType.getChannel(), STREAM_ID)) {
 
             // 创建消息缓冲区
             final UnsafeBuffer buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(config.messageSize, 64));
@@ -54,25 +72,7 @@ public class BinaryPerformancePublisher {
         }
     }
     
-    /**
-     * 微秒级精确延迟 (使用自旋等待)
-     * 注意: 这会消耗CPU资源，适用于短时间高精度延迟
-     */
-    private static void microsecondDelay(long microseconds) {
-        if (microseconds <= 0) return;
-        
-        final long startTime = System.nanoTime();
-        final long delayNanos = microseconds * 1000L;
-        
-        while ((System.nanoTime() - startTime) < delayNanos) {
-            // 自旋等待，提供纳秒级精度
-            Thread.onSpinWait(); // Java 9+ 的优化提示
-        }
-    }
-    
     private static void performanceTest(Publication publication, UnsafeBuffer buffer, Config config) {
-        System.out.println("开始性能测试...");
-        
         final long startTime = System.nanoTime();
         int successCount = 0;
         
@@ -161,10 +161,26 @@ public class BinaryPerformancePublisher {
                         config.messageCount = Integer.parseInt(args[++i]);
                     }
                     break;
+                case "-transport":
+                    if (i + 1 < args.length) {
+                        try {
+                            config.transportType = TransportType.valueOf(args[++i].toUpperCase());
+                        } catch (IllegalArgumentException e) {
+                            System.err.println("错误: 无效的传输方式: " + args[i]);
+                            System.err.println("支持的传输方式: UDP, IPC");
+                            printUsage();
+                            System.exit(1);
+                        }
+                    }
+                    break;
                 case "-help":
                     printUsage();
                     System.exit(0);
                     break;
+                default:
+                    System.err.println("错误: 未知参数: " + args[i]);
+                    printUsage();
+                    System.exit(1);
             }
         }
         
@@ -179,14 +195,28 @@ public class BinaryPerformancePublisher {
     
     private static void printUsage() {
         System.out.println("用法: java -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformancePublisher [选项]");
+        System.out.println();
         System.out.println("选项:");
-        System.out.println("  -size <bytes>    消息大小 (默认: " + DEFAULT_MESSAGE_SIZE + ")");
-        System.out.println("  -count <num>     测试消息数 (默认: " + DEFAULT_MESSAGE_COUNT + ")");
-        System.out.println("  -help            显示帮助信息");
+        System.out.println("  -size <bytes>         消息大小 (默认: " + DEFAULT_MESSAGE_SIZE + ")");
+        System.out.println("  -count <num>          测试消息数 (默认: " + DEFAULT_MESSAGE_COUNT + ")");
+        System.out.println("  -transport <方式>     传输方式: UDP 或 IPC (默认: " + DEFAULT_TRANSPORT.name() + ")");
+        System.out.println("  -help                 显示帮助信息");
+        System.out.println();
+        System.out.println("传输方式:");
+        System.out.println("  UDP    - 使用UDP网络传输 (适合跨网络测试)");
+        System.out.println("  IPC    - 使用进程间通信 (适合本机超低延迟测试)");
+        System.out.println();
+        System.out.println("示例:");
+        System.out.println("  java BinaryPerformancePublisher                                      # 使用默认设置");
+        System.out.println("  java BinaryPerformancePublisher -transport IPC                       # 使用IPC模式");
+        System.out.println("  java BinaryPerformancePublisher -count 10000000                      # 发送1000万条消息");
+        System.out.println("  java BinaryPerformancePublisher -transport IPC -count 50000000       # IPC模式，5000万条消息");
+        System.out.println("  java BinaryPerformancePublisher -size 128 -count 1000000             # 128字节消息，100万条");
     }
     
     private static class Config {
         int messageSize = DEFAULT_MESSAGE_SIZE;
         int messageCount = DEFAULT_MESSAGE_COUNT;
+        TransportType transportType = DEFAULT_TRANSPORT;
     }
 }

@@ -12,10 +12,9 @@ echo ""
 
 # CPU核心2 + 最高优先级 + 优化JVM参数
 echo "⚡ 使用优化配置启动订阅者..."
-echo "   - CPU亲和性: 核心2"  
-echo "   - 进程优先级: -20 (最高)"
-echo "   - 堆内存: 1GB"
-echo "   - GC: G1GC 1ms最大暂停"
+echo "   - 进程优先级: -15 (高优先级)"
+echo "   - 堆内存: 2GB"
+echo "   - GC: G1GC 5ms最大暂停"
 echo "   - 参数: $@"
 echo ""
 
@@ -36,15 +35,16 @@ fi
 echo "📍 使用Java: $JAVA_BIN"
 echo ""
 
-sudo taskset -c 2 nice -n -20 "$JAVA_BIN" \
+# 简化优化：去掉CPU亲和性绑定，保留优先级和内存优化
+nice -n -15 "$JAVA_BIN" \
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
-    -Xms1G -Xmx1G \
+    -Xms2G -Xmx2G \
     -XX:+UseG1GC \
-    -XX:MaxGCPauseMillis=1 \
+    -XX:MaxGCPauseMillis=5 \
     -XX:+UnlockExperimentalVMOptions \
     -XX:+UseLargePages \
     -XX:+AlwaysPreTouch \
     -XX:+DisableExplicitGC \
     -Daeron.dir=/dev/shm/aeron \
     -cp xsyphon-aeron-forex.jar \
-    com.xsyphon.aeron.BinaryPerformanceSubscriber "$@"
+    com.xsyphon.aeron.BinaryPerformanceSubscriber -transport UDP "$@"

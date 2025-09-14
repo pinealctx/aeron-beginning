@@ -1,5 +1,6 @@
 #!/bin/bash
-# Aeron二进制高性能测试 - 订阅者 (UDP模式)
+# binary-performance-subscriber-ipc.sh
+# Aeron二进制高性能测试 - 订阅者 (IPC模式)
 
 export AERON_DIR="/dev/shm/aeron"
 
@@ -27,9 +28,9 @@ else
     exit 1
 fi
 
-echo "🚀 启动Aeron二进制高性能测试订阅者 (UDP模式)..."
+echo "🚀 启动Aeron二进制高性能测试订阅者 (IPC模式)..."
 echo "连接到MediaDriver: $AERON_DIR"
-echo "传输方式: UDP (网络传输)"
+echo "传输方式: IPC (进程间通信)"
 echo "确保MediaDriver已在运行: ./start-mediadriver.sh"
 
 # 检查是否需要sudo权限
@@ -57,7 +58,7 @@ if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
          -XX:+UseG1GC \
          -XX:MaxGCPauseMillis=1 \
          -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber \
-         -transport UDP "$@"
+         -transport IPC "$@"
 else
     # 普通权限执行
     "$JAVA_CMD" --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
@@ -66,5 +67,5 @@ else
          -XX:+UseG1GC \
          -XX:MaxGCPauseMillis=1 \
          -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber \
-         -transport UDP "$@"
+         -transport IPC "$@"
 fi

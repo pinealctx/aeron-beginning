@@ -22,10 +22,18 @@ if pgrep -f "io.aeron.driver.MediaDriver" > /dev/null; then
     sleep 2
 fi
 
-# 确保RAM磁盘存在
+# 确保RAM磁盘存在并设置正确权限
 if [ ! -d "/dev/shm/aeron" ]; then
     echo "📁 创建Aeron目录: /dev/shm/aeron"
-    mkdir -p /dev/shm/aeron
+    sudo mkdir -p /dev/shm/aeron
+    sudo chown $USER:$USER /dev/shm/aeron
+    sudo chmod 755 /dev/shm/aeron
+    echo "   ✅ 目录权限已设置为当前用户"
+elif [ ! -w "/dev/shm/aeron" ]; then
+    echo "🔧 修复Aeron目录权限..."
+    sudo chown $USER:$USER /dev/shm/aeron
+    sudo chmod 755 /dev/shm/aeron
+    echo "   ✅ 权限修复完成"
 fi
 
 # 检查大页内存支持
@@ -39,8 +47,7 @@ if [ -f "/proc/meminfo" ]; then
 fi
 
 echo "⚡ 使用优化配置启动 MediaDriver..."
-echo "   - CPU亲和性: 核心0"
-echo "   - 进程优先级: -20 (最高)"
+echo "   - 进程优先级: -15 (高优先级)"
 echo "   - 线程模式: DEDICATED"
 echo "   - 空闲策略: BusySpinIdleStrategy"
 echo "   - 存储目录: /dev/shm/aeron"
@@ -64,12 +71,12 @@ fi
 echo "📍 使用Java: $JAVA_BIN"
 echo ""
 
-# 设置CPU亲和性和优先级启动MediaDriver
-sudo taskset -c 0 nice -n -20 "$JAVA_BIN" \
+# 简化优化：去掉CPU亲和性绑定，保留优先级
+nice -n -15 "$JAVA_BIN" \
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
     -Xms2G -Xmx2G \
     -XX:+UseG1GC \
-    -XX:MaxGCPauseMillis=1 \
+    -XX:MaxGCPauseMillis=5 \
     -XX:+UnlockExperimentalVMOptions \
     -XX:+UseLargePages \
     -XX:+AlwaysPreTouch \

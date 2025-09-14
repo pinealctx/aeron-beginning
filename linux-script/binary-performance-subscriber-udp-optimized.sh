@@ -1,5 +1,7 @@
 #!/bin/bash
-# Aeron二进制高性能测试 - 订阅者 (UDP模式)
+# binary-performance-subscriber-udp-optimized.sh
+# 
+# 🚀 UDP传输高度优化版 - 接近IPC性能
 
 export AERON_DIR="/dev/shm/aeron"
 
@@ -27,9 +29,9 @@ else
     exit 1
 fi
 
-echo "🚀 启动Aeron二进制高性能测试订阅者 (UDP模式)..."
+echo "🚀 启动Aeron二进制高性能测试订阅者 (UDP超优化模式)..."
 echo "连接到MediaDriver: $AERON_DIR"
-echo "传输方式: UDP (网络传输)"
+echo "传输方式: UDP (超优化网络传输)"
 echo "确保MediaDriver已在运行: ./start-mediadriver.sh"
 
 # 检查是否需要sudo权限
@@ -56,8 +58,20 @@ if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
          -Xms2g -Xmx2g \
          -XX:+UseG1GC \
          -XX:MaxGCPauseMillis=1 \
-         -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber \
-         -transport UDP "$@"
+         -XX:+UnlockExperimentalVMOptions \
+         -XX:+UseLargePages \
+         -XX:+AlwaysPreTouch \
+         -XX:+DisableExplicitGC \
+         -Daeron.socket.so_sndbuf=2097152 \
+         -Daeron.socket.so_rcvbuf=2097152 \
+         -Daeron.mtu.length=8192 \
+         -Daeron.ipc.mtu.length=8192 \
+         -Daeron.term.buffer.length=2097152 \
+         -Daeron.rcv.initial.window.length=2097152 \
+         -Daeron.threading.mode=DEDICATED \
+         -Daeron.conductor.idle.strategy=org.agrona.concurrent.BusySpinIdleStrategy \
+         -Daeron.receiver.idle.strategy=org.agrona.concurrent.BusySpinIdleStrategy \
+         -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber -transport UDP "$@"
 else
     # 普通权限执行
     "$JAVA_CMD" --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
@@ -65,6 +79,18 @@ else
          -Xms2g -Xmx2g \
          -XX:+UseG1GC \
          -XX:MaxGCPauseMillis=1 \
-         -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber \
-         -transport UDP "$@"
+         -XX:+UnlockExperimentalVMOptions \
+         -XX:+UseLargePages \
+         -XX:+AlwaysPreTouch \
+         -XX:+DisableExplicitGC \
+         -Daeron.socket.so_sndbuf=2097152 \
+         -Daeron.socket.so_rcvbuf=2097152 \
+         -Daeron.mtu.length=8192 \
+         -Daeron.ipc.mtu.length=8192 \
+         -Daeron.term.buffer.length=2097152 \
+         -Daeron.rcv.initial.window.length=2097152 \
+         -Daeron.threading.mode=DEDICATED \
+         -Daeron.conductor.idle.strategy=org.agrona.concurrent.BusySpinIdleStrategy \
+         -Daeron.receiver.idle.strategy=org.agrona.concurrent.BusySpinIdleStrategy \
+         -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber -transport UDP "$@"
 fi

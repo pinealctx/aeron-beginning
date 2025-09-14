@@ -9,12 +9,29 @@ import org.agrona.DirectBuffer;
 /**
  * 高性能二进制消息订阅者
  * 解析二进制消息并计算延迟统计
+ * 支持UDP和IPC两种传输方式
  * 接收2000万条消息后自动退出并打印统计
  */
 public class BinaryPerformanceSubscriber {
-    private static final String CHANNEL = "aeron:udp?endpoint=localhost:20121";
+    // 传输方式枚举
+    public enum TransportType {
+        UDP("aeron:udp?endpoint=localhost:20121"),
+        IPC("aeron:ipc?term-length=1048576");
+        
+        private final String channel;
+        
+        TransportType(String channel) {
+            this.channel = channel;
+        }
+        
+        public String getChannel() {
+            return channel;
+        }
+    }
+    
     private static final int STREAM_ID = 1001;
     private static final long DEFAULT_TARGET_MESSAGE_COUNT = 20_000_000L;  // 默认2000万条消息
+    private static TransportType transportType = TransportType.UDP;  // 默认UDP
     
     // 统计信息 - 单线程处理，使用普通变量即可
     private static long messageCount = 0;
@@ -32,13 +49,14 @@ public class BinaryPerformanceSubscriber {
         parseArguments(args);
         
         System.out.println("=== Aeron二进制高性能测试 - 订阅者 ===");
-        System.out.println("Channel: " + CHANNEL);
+        System.out.println("传输方式: " + transportType.name());
+        System.out.println("Channel: " + transportType.getChannel());
         System.out.println("Stream ID: " + STREAM_ID);
         System.out.printf("目标消息数: %,d 条\n", targetMessageCount);
         System.out.println("等待消息...\n");
 
         try (Aeron aeron = Aeron.connect();
-             Subscription subscription = aeron.addSubscription(CHANNEL, STREAM_ID)) {
+             Subscription subscription = aeron.addSubscription(transportType.getChannel(), STREAM_ID)) {
 
             final BinaryMessageHandler messageHandler = new BinaryMessageHandler();
             
@@ -72,7 +90,7 @@ public class BinaryPerformanceSubscriber {
             // 设置消息大小（第一次收到消息时）
             if (messageSize == 0) {
                 messageSize = length;
-                System.out.println("🚀 开始接收测试消息 (消息大小: " + length + " bytes)");
+                // System.out.println("🚀 开始接收测试消息 (消息大小: " + length + " bytes)");
             }
             
             // 验证消息格式
@@ -86,11 +104,11 @@ public class BinaryPerformanceSubscriber {
             final long latency = receiveTime - sendTime;
                         
             // 更新统计信息
-            updateStatistics(latency, receiveTime);
+            updateStatistics(receiveTime, latency);
         }
     }
     
-    private static void updateStatistics(long latency, long receiveTime) {
+    private static void updateStatistics(long receiveTime, long latency) {
         if (firstMessageTime == 0) {
             firstMessageTime = receiveTime;
         }
@@ -110,11 +128,6 @@ public class BinaryPerformanceSubscriber {
         // 检查是否达到目标消息数量
         if (messageCount >= targetMessageCount) {
             testCompleted = true;
-        }
-        
-        // 每100万条消息显示进度（不影响性能）
-        if (messageCount % 1_000_000 == 0) {
-            System.out.printf("已接收: %d 万条消息\n", messageCount / 10_000);
         }
     }
     
@@ -146,6 +159,24 @@ public class BinaryPerformanceSubscriber {
                         System.exit(1);
                     }
                     break;
+                case "-transport":
+                case "--transport":
+                    if (i + 1 < args.length) {
+                        try {
+                            transportType = TransportType.valueOf(args[i + 1].toUpperCase());
+                            i++; // 跳过参数值
+                        } catch (IllegalArgumentException e) {
+                            System.err.println("错误: 无效的传输方式: " + args[i + 1]);
+                            System.err.println("支持的传输方式: UDP, IPC");
+                            printUsage();
+                            System.exit(1);
+                        }
+                    } else {
+                        System.err.println("错误: -transport 参数需要指定传输方式");
+                        printUsage();
+                        System.exit(1);
+                    }
+                    break;
                 case "-h":
                 case "--help":
                     printUsage();
@@ -166,13 +197,19 @@ public class BinaryPerformanceSubscriber {
         System.out.println("用法: java BinaryPerformanceSubscriber [选项]");
         System.out.println();
         System.out.println("选项:");
-        System.out.println("  -count, --count <数量>    目标消息数量 (默认: " + String.format("%,d", DEFAULT_TARGET_MESSAGE_COUNT) + ")");
-        System.out.println("  -h, --help               显示此帮助信息");
+        System.out.println("  -count, --count <数量>      目标消息数量 (默认: " + String.format("%,d", DEFAULT_TARGET_MESSAGE_COUNT) + ")");
+        System.out.println("  -transport <方式>           传输方式: UDP 或 IPC (默认: UDP)");
+        System.out.println("  -h, --help                  显示此帮助信息");
+        System.out.println();
+        System.out.println("传输方式:");
+        System.out.println("  UDP    - 使用UDP网络传输 (适合跨网络测试)");
+        System.out.println("  IPC    - 使用进程间通信 (适合本机超低延迟测试)");
         System.out.println();
         System.out.println("示例:");
-        System.out.println("  java BinaryPerformanceSubscriber                    # 使用默认2000万条消息");
-        System.out.println("  java BinaryPerformanceSubscriber -count 10000000    # 接收1000万条消息");
-        System.out.println("  java BinaryPerformanceSubscriber -count 50000000    # 接收5000万条消息");
+        System.out.println("  java BinaryPerformanceSubscriber                              # 使用默认UDP模式");
+        System.out.println("  java BinaryPerformanceSubscriber -transport IPC               # 使用IPC模式");
+        System.out.println("  java BinaryPerformanceSubscriber -count 10000000              # UDP模式，1000万条消息");
+        System.out.println("  java BinaryPerformanceSubscriber -transport IPC -count 50000000 # IPC模式，5000万条消息");
     }
     
     private static void printFinalStatistics() {

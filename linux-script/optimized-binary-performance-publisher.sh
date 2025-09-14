@@ -16,11 +16,11 @@ fi
 echo "📍 使用Java: $JAVA_BIN"
 echo ""
 
-sudo taskset -c 1 nice -n -20 "$JAVA_BIN" \
+nice -n -15 "$JAVA_BIN" \
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
-    -Xms1G -Xmx1G \
+    -Xms2G -Xmx2G \
     -XX:+UseG1GC \
-    -XX:MaxGCPauseMillis=1 \
+    -XX:MaxGCPauseMillis=5 \
     -XX:+UnlockExperimentalVMOptions \
     -XX:+UseLargePages \
     -XX:+AlwaysPreTouch \
