@@ -92,8 +92,8 @@ public class BinaryPerformancePublisher {
                 } else {
                     Thread.onSpinWait();
                 }
-                successCount++;
             }
+            successCount++;
         }
         
         final long endTime = System.nanoTime();

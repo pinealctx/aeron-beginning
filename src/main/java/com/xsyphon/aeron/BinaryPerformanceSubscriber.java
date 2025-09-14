@@ -6,40 +6,36 @@ import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
 import org.agrona.DirectBuffer;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.atomic.AtomicLong;
-
 /**
  * 高性能二进制消息订阅者
  * 解析二进制消息并计算延迟统计
+ * 接收2000万条消息后自动退出并打印统计
  */
 public class BinaryPerformanceSubscriber {
     private static final String CHANNEL = "aeron:udp?endpoint=localhost:20121";
     private static final int STREAM_ID = 1001;
+    private static final long DEFAULT_TARGET_MESSAGE_COUNT = 20_000_000L;  // 默认2000万条消息
     
-    // 统计信息 - 全部使用原子操作确保线程安全
-    private static final AtomicLong messageCount = new AtomicLong(0);
-    private static final AtomicLong totalLatency = new AtomicLong(0);
-    private static final AtomicLong maxLatency = new AtomicLong(0);
-    private static final AtomicLong minLatency = new AtomicLong(Long.MAX_VALUE);
-    private static volatile long firstMessageTime = 0;
-    private static volatile long lastMessageTime = 0;
-    private static volatile int messageSize = 0;
-    private static volatile boolean testCompleted = false;
-    
-    // 异步打印队列
-    private static final BlockingQueue<StatSnapshot> printQueue = new ArrayBlockingQueue<>(1000);
-    private static Thread printThread;
+    // 统计信息 - 单线程处理，使用普通变量即可
+    private static long messageCount = 0;
+    private static long totalLatency = 0;
+    private static long maxLatency = 0;
+    private static long minLatency = Long.MAX_VALUE;
+    private static long firstMessageTime = 0;
+    private static long lastMessageTime = 0;
+    private static int messageSize = 0;
+    private static boolean testCompleted = false;
+    private static long targetMessageCount = DEFAULT_TARGET_MESSAGE_COUNT;
 
     public static void main(String[] args) {
+        // 解析命令行参数
+        parseArguments(args);
+        
         System.out.println("=== Aeron二进制高性能测试 - 订阅者 ===");
         System.out.println("Channel: " + CHANNEL);
         System.out.println("Stream ID: " + STREAM_ID);
+        System.out.printf("目标消息数: %,d 条\n", targetMessageCount);
         System.out.println("等待消息...\n");
-
-        // 启动异步打印线程
-        startPrintThread();
 
         try (Aeron aeron = Aeron.connect();
              Subscription subscription = aeron.addSubscription(CHANNEL, STREAM_ID)) {
@@ -48,7 +44,7 @@ public class BinaryPerformanceSubscriber {
             
             System.out.println("开始监听消息...");
             
-            // 主循环
+            // 主循环 - 接收消息直到达到目标数量
             while (!testCompleted) {
                 final int fragmentsRead = subscription.poll(messageHandler, 10);
                 
@@ -59,9 +55,6 @@ public class BinaryPerformanceSubscriber {
             
             // 打印最终统计信息
             printFinalStatistics();
-            
-            // 停止打印线程
-            stopPrintThread();
             
         } catch (Exception e) {
             e.printStackTrace();
@@ -75,6 +68,12 @@ public class BinaryPerformanceSubscriber {
         @Override
         public void onFragment(DirectBuffer buffer, int offset, int length, Header header) {
             final long receiveTime = System.nanoTime();
+            
+            // 设置消息大小（第一次收到消息时）
+            if (messageSize == 0) {
+                messageSize = length;
+                System.out.println("🚀 开始接收测试消息 (消息大小: " + length + " bytes)");
+            }
             
             // 验证消息格式
             if (length < 8) {
@@ -97,192 +96,133 @@ public class BinaryPerformanceSubscriber {
         }
         lastMessageTime = receiveTime;
         
-        final long currentCount = messageCount.incrementAndGet();
-        totalLatency.addAndGet(latency);  // 原子操作
+        messageCount++;
         
-        // 原子更新最大/最小延迟
-        updateMaxLatency(latency);
-        updateMinLatency(latency);
-        
-        // 每100万条消息异步打印统计 - 不阻塞主线程
-        if (currentCount % 1_000_000 == 0) {
-            scheduleAsyncPrint(currentCount);
+        // 更新统计
+        totalLatency += latency;
+        if (latency > maxLatency) {
+            maxLatency = latency;
+        }
+        if (latency < minLatency) {
+            minLatency = latency;
         }
         
-        // 如果达到2000万条消息，自动完成测试
-        if (currentCount >= 20_000_000) {
+        // 检查是否达到目标消息数量
+        if (messageCount >= targetMessageCount) {
             testCompleted = true;
         }
-    }
-    
-    private static void updateMaxLatency(long latency) {
-        long currentMax = maxLatency.get();
-        while (latency > currentMax) {
-            if (maxLatency.compareAndSet(currentMax, latency)) {
-                break;
-            }
-            currentMax = maxLatency.get();
-        }
-    }
-    
-    private static void updateMinLatency(long latency) {
-        long currentMin = minLatency.get();
-        while (latency < currentMin) {
-            if (minLatency.compareAndSet(currentMin, latency)) {
-                break;
-            }
-            currentMin = minLatency.get();
-        }
-    }
-    
-    /**
-     * 统计快照类 - 用于异步打印
-     */
-    private static class StatSnapshot {
-        final long messageCount;
-        final long timeSpanNs;
-        final long totalLatency;
-        final long minLatency;
-        final long maxLatency;
-        final int messageSize;
         
-        StatSnapshot(long messageCount, long timeSpanNs, long totalLatency, 
-                    long minLatency, long maxLatency, int messageSize) {
-            this.messageCount = messageCount;
-            this.timeSpanNs = timeSpanNs;
-            this.totalLatency = totalLatency;
-            this.minLatency = minLatency;
-            this.maxLatency = maxLatency;
-            this.messageSize = messageSize;
+        // 每100万条消息显示进度（不影响性能）
+        if (messageCount % 1_000_000 == 0) {
+            System.out.printf("已接收: %d 万条消息\n", messageCount / 10_000);
         }
     }
     
     /**
-     * 启动异步打印线程
+     * 解析命令行参数
      */
-    private static void startPrintThread() {
-        printThread = new Thread(() -> {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    StatSnapshot snapshot = printQueue.take();
-                    printStatisticsFromSnapshot(snapshot);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+    private static void parseArguments(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            switch (args[i]) {
+                case "-count":
+                case "--count":
+                    if (i + 1 < args.length) {
+                        try {
+                            targetMessageCount = Long.parseLong(args[i + 1]);
+                            if (targetMessageCount <= 0) {
+                                System.err.println("错误: 消息数量必须大于0");
+                                printUsage();
+                                System.exit(1);
+                            }
+                            i++; // 跳过参数值
+                        } catch (NumberFormatException e) {
+                            System.err.println("错误: 无效的消息数量: " + args[i + 1]);
+                            printUsage();
+                            System.exit(1);
+                        }
+                    } else {
+                        System.err.println("错误: -count 参数需要指定数量");
+                        printUsage();
+                        System.exit(1);
+                    }
                     break;
-                }
-            }
-        }, "AsyncPrintThread");
-        printThread.setDaemon(true);
-        printThread.start();
-    }
-    
-    /**
-     * 停止异步打印线程
-     */
-    private static void stopPrintThread() {
-        if (printThread != null) {
-            printThread.interrupt();
-            try {
-                printThread.join(1000); // 等待最多1秒
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                case "-h":
+                case "--help":
+                    printUsage();
+                    System.exit(0);
+                    break;
+                default:
+                    System.err.println("错误: 未知参数: " + args[i]);
+                    printUsage();
+                    System.exit(1);
             }
         }
     }
     
     /**
-     * 异步调度打印任务 - 极轻量级，不阻塞主线程
+     * 打印使用说明
      */
-    private static void scheduleAsyncPrint(long currentCount) {
-        final long timeSpan = lastMessageTime - firstMessageTime;
-        final StatSnapshot snapshot = new StatSnapshot(
-            currentCount, timeSpan, totalLatency.get(), minLatency.get(), maxLatency.get(), messageSize
-        );
-        
-        // 非阻塞式提交，如果队列满了就丢弃（避免影响性能）
-        printQueue.offer(snapshot);
-    }
-    
-    /**
-     * 从快照打印统计信息
-     */
-    private static void printStatisticsFromSnapshot(StatSnapshot snapshot) {
-        final double timeSpanSec = snapshot.timeSpanNs / 1_000_000_000.0;
-        final double messagesPerSecond = snapshot.messageCount / timeSpanSec;
-        final double avgLatencyUs = (snapshot.totalLatency / (double) snapshot.messageCount) / 1000.0;
-        final double maxLatencyUs = snapshot.maxLatency / 1000.0;
-        final double minLatencyUs = snapshot.minLatency / 1000.0;
-        final double throughputMBps = (messagesPerSecond * snapshot.messageSize) / (1024 * 1024);
-        
-        System.out.println("\n=== 订阅者阶段性统计 ===");
-        System.out.printf("接收消息数: %d\n", snapshot.messageCount);
-        System.out.printf("测试时长: %.2f 秒\n", timeSpanSec);
-        System.out.printf("吞吐量: %.0f msg/sec\n", messagesPerSecond);
-        System.out.printf("吞吐量: %.2f MB/sec\n", throughputMBps);
-        System.out.printf("端到端延迟:\n");
-        System.out.printf("  平均: %.2f μs\n", avgLatencyUs);
-        System.out.printf("  最小: %.2f μs\n", minLatencyUs);
-        System.out.printf("  最大: %.2f μs\n", maxLatencyUs);
-        System.out.println("继续监听...\n");
-    }
-    
-    private static void validateBinaryContent(DirectBuffer buffer, int offset, int length) {
-        // 验证循环填充模式(8字节之后应该是0-255循环)
-        for (int i = 8; i < Math.min(length, 24); i++) { // 只验证前16字节的填充
-            byte expected = (byte) ((i - 8) % 256);
-            byte actual = buffer.getByte(offset + i);
-            
-            if (actual != expected) {
-                System.err.printf("警告: 字节%d应为%d但为%d\n", i, expected & 0xFF, actual & 0xFF);
-                break;
-            }
-        }
+    private static void printUsage() {
+        System.out.println("用法: java BinaryPerformanceSubscriber [选项]");
+        System.out.println();
+        System.out.println("选项:");
+        System.out.println("  -count, --count <数量>    目标消息数量 (默认: " + String.format("%,d", DEFAULT_TARGET_MESSAGE_COUNT) + ")");
+        System.out.println("  -h, --help               显示此帮助信息");
+        System.out.println();
+        System.out.println("示例:");
+        System.out.println("  java BinaryPerformanceSubscriber                    # 使用默认2000万条消息");
+        System.out.println("  java BinaryPerformanceSubscriber -count 10000000    # 接收1000万条消息");
+        System.out.println("  java BinaryPerformanceSubscriber -count 50000000    # 接收5000万条消息");
     }
     
     private static void printFinalStatistics() {
-        final long finalCount = messageCount.get();
+        final long finalCount = messageCount;
         final long timeSpanNs = lastMessageTime - firstMessageTime;
         final double timeSpanSec = timeSpanNs / 1_000_000_000.0;
         final double messagesPerSecond = finalCount / timeSpanSec;
-        final double avgLatencyUs = (totalLatency.get() / (double) finalCount) / 1000.0;
-        final double maxLatencyUs = maxLatency.get() / 1000.0;
-        final double minLatencyUs = minLatency.get() / 1000.0;
+        final double avgLatencyUs = (totalLatency / (double) finalCount) / 1000.0;
+        final double maxLatencyUs = maxLatency / 1000.0;
+        final double minLatencyUs = minLatency / 1000.0;
         final double throughputMBps = (messagesPerSecond * messageSize) / (1024 * 1024);
         
-        System.out.println("\n\n=== 订阅者最终性能统计 ===");
-        System.out.printf("总接收消息数: %d\n", finalCount);
+        System.out.println("\n\n=== 📊 最终性能统计报告 ===");
+        System.out.printf("总接收消息数: %,d 条\n", finalCount);
         System.out.printf("消息大小: %d bytes\n", messageSize);
-        System.out.printf("测试总时长: %.2f 秒\n", timeSpanSec);
+        System.out.printf("测试总时长: %.3f 秒\n", timeSpanSec);
         System.out.println();
-        System.out.printf("接收吞吐量: %.0f msg/sec\n", messagesPerSecond);
-        System.out.printf("接收吞吐量: %.2f MB/sec\n", throughputMBps);
+        System.out.printf("📈 吞吐量性能:\n");
+        System.out.printf("  消息吞吐量: %,.0f msg/sec\n", messagesPerSecond);
+        System.out.printf("  数据吞吐量: %.2f MB/sec\n", throughputMBps);
         System.out.println();
-        System.out.printf("端到端延迟统计:\n");
+        System.out.printf("⚡ 端到端延迟统计 (receiveTime - sendTime):\n");
         System.out.printf("  平均延迟: %.2f μs\n", avgLatencyUs);
         System.out.printf("  最小延迟: %.2f μs\n", minLatencyUs);
         System.out.printf("  最大延迟: %.2f μs\n", maxLatencyUs);
         System.out.println();
         
-        // 延迟分析
+        // 性能评估
         if (avgLatencyUs < 1) {
-            System.out.println("🚀 端到端延迟: 超低延迟 - 完美适合超高频交易!");
+            System.out.println("🚀 延迟评估: 超低延迟 (< 1μs) - 完美适合超高频交易!");
         } else if (avgLatencyUs < 5) {
-            System.out.println("⚡ 端到端延迟: 优秀 - 适合高频交易!");
+            System.out.println("⚡ 延迟评估: 优秀 (< 5μs) - 适合高频交易!");
         } else if (avgLatencyUs < 20) {
-            System.out.println("✅ 端到端延迟: 良好 - 适合中频交易!");
+            System.out.println("✅ 延迟评估: 良好 (< 20μs) - 适合中频交易!");
+        } else if (avgLatencyUs < 100) {
+            System.out.println("⚠️ 延迟评估: 可接受 (< 100μs) - 需要优化!");
         } else {
-            System.out.println("⚠️ 端到端延迟: 需要优化");
+            System.out.println("❌ 延迟评估: 较高 (>= 100μs) - 急需优化!");
         }
         
-        // 吞吐量分析
-        if (messagesPerSecond > 1_000_000) {
-            System.out.println("🚀 吞吐量: 百万级消息处理能力!");
-        } else if (messagesPerSecond > 500_000) {
-            System.out.println("⚡ 吞吐量: 50万+消息处理能力!");
-        } else if (messagesPerSecond > 100_000) {
-            System.out.println("✅ 吞吐量: 10万+消息处理能力!");
+        if (messagesPerSecond > 10_000_000) {
+            System.out.println("🚀 吞吐量评估: 卓越 (> 1000万/秒)!");
+        } else if (messagesPerSecond > 5_000_000) {
+            System.out.println("⚡ 吞吐量评估: 优秀 (> 500万/秒)!");
+        } else if (messagesPerSecond > 1_000_000) {
+            System.out.println("✅ 吞吐量评估: 良好 (> 100万/秒)!");
         } else {
-            System.out.println("⚠️ 吞吐量: 需要优化配置");
+            System.out.println("⚠️ 吞吐量评估: 需要优化!");
         }
+        
+        System.out.println("\n测试完成! 🎉");
     }
 }
