@@ -1,12 +1,12 @@
 #!/bin/bash
-# Aeron性能基准测试 - 发布者
+# Aeron二进制高性能测试 - 订阅者
 
 export AERON_DIR="/dev/shm/aeron"
 
-echo "🚀 启动Aeron字符串性能测试发布者..."
+echo "🚀 启动Aeron二进制高性能测试订阅者..."
 echo "连接到MediaDriver: $AERON_DIR"
 echo "确保MediaDriver已在运行: ./start-mediadriver.sh"
-echo "确保订阅者已在运行: ./performance-subscriber.sh"
+echo "准备接收二进制性能数据..."
 echo ""
 
 java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
@@ -14,4 +14,4 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
      -Xms2g -Xmx2g \
      -XX:+UseG1GC \
      -XX:MaxGCPauseMillis=1 \
-     -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.AeronPerformancePublisher
+     -cp xsyphon-aeron-forex.jar com.xsyphon.aeron.BinaryPerformanceSubscriber

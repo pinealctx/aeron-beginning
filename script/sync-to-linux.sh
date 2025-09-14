@@ -19,9 +19,9 @@ echo "脚本源目录: $LOCAL_SCRIPT_DIR"
 echo "目标: $REMOTE_TARGET"
 
 # 同步JAR文件
-echo "📦 同步JAR文件..."
+echo "📦 同步统一JAR文件..."
 rsync -avz --progress \
-    $LOCAL_JAR_DIR/*.jar \
+    $LOCAL_JAR_DIR/xsyphon-aeron-forex.jar \
     $REMOTE_TARGET/
 
 # 同步Linux脚本
@@ -35,5 +35,13 @@ echo ""
 echo "在Linux服务器上运行:"
 echo "cd $REMOTE_TARGET"
 echo "chmod +x *.sh"
-echo "./run-subscriber.sh  # 或者运行其他脚本"
+echo ""
+echo "可用脚本:"
+echo "  ./simple-pulisher.sh           # 简单外汇发布者"
+echo "  ./simple-subscriber.sh         # 简单外汇订阅者"
+echo "  ./performance-publisher.sh     # 字符串性能发布者"
+echo "  ./performance-subscriber.sh    # 字符串性能订阅者"
+echo "  ./binary-performance-publisher.sh   # 二进制性能发布者"
+echo "  ./binary-performance-subscriber.sh  # 二进制性能订阅者"
+echo "  ./start-mediadriver.sh         # 启动MediaDriver"
 

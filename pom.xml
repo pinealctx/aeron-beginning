@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.example</groupId>
-    <artifactId>aeron-examples</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <groupId>com.xsyphon</groupId>
+    <artifactId>xsyphon-aeron-forex</artifactId>
+    <version>0.1.0</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -32,81 +32,68 @@
                 <configuration>
                     <source>21</source>
                     <target>21</target>
+                    <!-- 禁用注解处理以消除警告 -->
+                    <proc>none</proc>
+                    <!-- 或者也可以添加编译器参数来隐藏警告 -->
+                    <compilerArgs>
+                        <arg>-Xlint:-options</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
             
-            <!-- 打包依赖的JAR文件 -->
+                        <!-- Maven JAR Plugin - 生成临时JAR供shade使用 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <!-- 生成一个临时的JAR，shade后会被最终JAR替换 -->
+                    <forceCreation>true</forceCreation>
+                </configuration>
+            </plugin>
+            
+            <!-- 直接打包成统一的可执行JAR，不依赖原始JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.4.1</version>
                 <executions>
-                    <!-- Publisher JAR -->
                     <execution>
-                        <id>publisher</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <!-- 处理重叠资源，避免MANIFEST.MF冲突 -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/MANIFEST.MF</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.xsyphon.aeron.SimpleForexPublisher</mainClass>
+                                    <manifestEntries>
+                                        <Multi-Release>true</Multi-Release>
+                                        <!-- 可执行类列表 -->
+                                        <Simple-Forex-Publisher>com.xsyphon.aeron.SimpleForexPublisher</Simple-Forex-Publisher>
+                                        <Simple-Forex-Subscriber>com.xsyphon.aeron.SimpleForexSubscriber</Simple-Forex-Subscriber>
+                                        <Performance-Publisher>com.xsyphon.aeron.AeronPerformancePublisher</Performance-Publisher>
+                                        <Performance-Subscriber>com.xsyphon.aeron.AeronPerformanceSubscriber</Performance-Subscriber>
+                                        <Binary-Performance-Publisher>com.xsyphon.aeron.BinaryPerformancePublisher</Binary-Performance-Publisher>
+                                        <Binary-Performance-Subscriber>com.xsyphon.aeron.BinaryPerformanceSubscriber</Binary-Performance-Subscriber>
+                                    </manifestEntries>
                                 </transformer>
                             </transformers>
-                            <finalName>aeron-forex-publisher</finalName>
-                        </configuration>
-                    </execution>
-                    <!-- Subscriber JAR -->
-                    <execution>
-                        <id>subscriber</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.xsyphon.aeron.SimpleForexSubscriber</mainClass>
-                                </transformer>
-                            </transformers>
-                            <finalName>aeron-forex-subscriber</finalName>
-                        </configuration>
-                    </execution>
-                    <!-- Performance Publisher JAR -->
-                    <execution>
-                        <id>perf-publisher</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.xsyphon.aeron.AeronPerformancePublisher</mainClass>
-                                </transformer>
-                            </transformers>
-                            <finalName>aeron-performance-publisher</finalName>
-                        </configuration>
-                    </execution>
-                    <!-- Performance Subscriber JAR -->
-                    <execution>
-                        <id>perf-subscriber</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.xsyphon.aeron.AeronPerformanceSubscriber</mainClass>
-                                </transformer>
-                            </transformers>
-                            <finalName>aeron-performance-subscriber</finalName>
+                            <!-- 使用项目的artifact和版本信息生成最终JAR名 -->
+                            <finalName>${project.artifactId}</finalName>
                         </configuration>
                     </execution>
                 </executions>
