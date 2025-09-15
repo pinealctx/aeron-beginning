@@ -254,10 +254,10 @@ public class BinaryPerformancePublisher {
         System.out.println("注意: 这是发送端统计，端到端延迟请查看订阅者统计结果");
         
         // 输出详细的HdrHistogram报告（可选）
-        if (successCount > 10000) { // 只有大量数据时才输出
+        /*if (successCount > 10000) { // 只有大量数据时才输出
             System.out.println("\n📋 发送延迟 HdrHistogram 详细统计:");
             sendLatencyHistogram.outputPercentileDistribution(System.out, 1.0);
-        }
+        }*/
     }
     
     private static Config parseArgs(String[] args) {
@@ -354,10 +354,15 @@ public class BinaryPerformancePublisher {
         String customEndpoint = null; // 自定义端点IP地址
         
         public String getEffectiveChannel() {
-            if (transportType == TransportType.NETWORK_UDP && customEndpoint != null) {
-                return transportType.getChannel(customEndpoint);
+            if (transportType == TransportType.NETWORK_UDP) {
+                if (customEndpoint == null) {
+                    throw new IllegalArgumentException("NETWORK_UDP模式必须指定IP地址 (使用 -bind 参数)");
+                }
+                // NETWORK_UDP模式：Publisher发送到指定的Subscriber IP地址
+                // 使用标准UDP unicast格式：endpoint指向目标地址
+                return "aeron:udp?endpoint=" + customEndpoint + ":20121";
             } else if (transportType == TransportType.UDP && customEndpoint != null) {
-                // UDP模式下指定IP时，使用自定义地址
+                // UDP模式下指定IP时，Publisher绑定到指定地址
                 return "aeron:udp?endpoint=" + customEndpoint + ":20121";
             }
             return transportType.getChannel();

@@ -44,8 +44,12 @@ public class BinaryPerformanceSubscriber {
     private static String customEndpoint = null; // 自定义端点IP地址 (Subscriber连接到Publisher的IP)
     
     private static String getEffectiveChannel() {
-        if (transportType == TransportType.NETWORK_UDP && customEndpoint != null) {
-            return transportType.getChannel(customEndpoint);
+        if (transportType == TransportType.NETWORK_UDP) {
+            if (customEndpoint == null) {
+                throw new IllegalArgumentException("NETWORK_UDP模式必须指定Publisher的IP地址 (使用 -connect 参数)");
+            }
+            // NETWORK_UDP模式：Subscriber监听本地端口，接收来自任何地址的数据
+            return "aeron:udp?endpoint=0.0.0.0:20121";
         } else if (transportType == TransportType.UDP && customEndpoint != null) {
             // UDP模式下指定IP时，连接到指定的Publisher地址
             return "aeron:udp?endpoint=" + customEndpoint + ":20121";
@@ -65,8 +69,8 @@ public class BinaryPerformanceSubscriber {
     private static long targetMessageCount = DEFAULT_TARGET_MESSAGE_COUNT;
     
     // HdrHistogram用于精确的延迟分布统计
-    // 最高值1秒(1,000,000μs)，精度到1μs，3位有效数字
-    private static final Histogram latencyHistogram = new Histogram(1_000_000L, 3);
+    // 最高值10秒(10,000,000μs)，精度到1μs，3位有效数字
+    private static final Histogram latencyHistogram = new Histogram(10_000_000L, 3);
 
     public static void main(String[] args) {
         // 解析命令行参数
@@ -126,6 +130,12 @@ public class BinaryPerformanceSubscriber {
             // 解析大端时间戳
             final long sendTime = buffer.getLong(offset, java.nio.ByteOrder.BIG_ENDIAN);
             final long latency = receiveTime - sendTime;
+            
+            // 调试异常延迟（仅前几条消息）
+            if (messageCount < 5 || latency < 0 || latency > 10_000_000_000L) { // 10秒以上
+                System.out.printf("消息#%d: 发送时间=%d, 接收时间=%d, 延迟=%d ns (%.3f ms)\n", 
+                                messageCount + 1, sendTime, receiveTime, latency, latency / 1_000_000.0);
+            }
                         
             // 更新统计信息
             updateStatistics(receiveTime, latency);
@@ -151,7 +161,13 @@ public class BinaryPerformanceSubscriber {
         
         // 记录到HdrHistogram (转换为微秒)
         final long latencyUs = latency / 1000L;
-        latencyHistogram.recordValue(latencyUs);
+        
+        // 防止异常延迟值破坏统计（可能是时钟同步问题）
+        if (latencyUs > 0 && latencyUs < 10_000_000L) { // 10秒以内的延迟才记录
+            latencyHistogram.recordValue(latencyUs);
+        } else if (latencyUs >= 10_000_000L) {
+            System.err.println("⚠️ 检测到异常延迟: " + latencyUs + "μs (" + (latencyUs/1000000.0) + "秒) - 可能是时钟同步问题");
+        }
         
         // 检查是否达到目标消息数量
         if (messageCount >= targetMessageCount) {
@@ -331,10 +347,10 @@ public class BinaryPerformanceSubscriber {
         }
         
         // 输出详细的HdrHistogram报告（可选）
-        if (finalCount > 10000) { // 只有大量数据时才输出
+        /*if (finalCount > 10000) { // 只有大量数据时才输出
             System.out.println("\n📋 HdrHistogram 详细统计:");
             latencyHistogram.outputPercentileDistribution(System.out, 1.0);
-        }
+        }*/
         
         System.out.println("\n测试完成! 🎉");
     }

@@ -1,53 +1,117 @@
-# 🚀 Aeron 高性能消息系统
+# Aeron Linux 脚本集合
 
-## 📋 目录结构
+本目录包含用于Aeron高性能消息传输测试的Linux脚本，支持本机IPC和跨机器UDP测试。
 
-```
-linux-script/
-├── README.md                                    # 本说明文档
-├── aeron-all-1.48.6.jar                       # Aeron核心库
-│
-├── 📁 MediaDriver启动脚本
-│   ├── start-mediadriver.sh                   # 基础版MediaDriver
-│   ├── moderate-start-mediadriver.sh          # 中等优化MediaDriver
-│   └── optimized-start-mediadriver.sh         # 极致优化MediaDriver
-│
-├── 📁 Binary Performance测试 (3种优化级别)
-│   ├── binary-performance-publisher.sh        # 基础版发布者
-│   ├── binary-performance-subscriber.sh       # 基础版订阅者
-│   ├── moderate-binary-performance-publisher.sh   # 中等优化发布者
-│   ├── moderate-binary-performance-subscriber.sh  # 中等优化订阅者
-│   ├── optimized-binary-performance-publisher.sh  # 极致优化发布者
-│   └── optimized-binary-performance-subscriber.sh # 极致优化订阅者
-│
-└── 📁 工具脚本
-    ├── download-aeron.sh                      # 下载Aeron库
-    ├── stop-mediadriver.sh                   # 停止MediaDriver
-    └── fix-aeron-permissions.sh              # 修复权限问题
-```
+## 📁 脚本分类
 
-## 🎯 三种优化级别
+### 🚀 MediaDriver 管理
+| 脚本 | 功能 | 说明 |
+|------|------|------|
+| `start-mediadriver.sh` | 启动MediaDriver | 高性能配置，支持跨机器通信 |
+| `stop-mediadriver.sh` | 停止MediaDriver | 清理资源和进程 |
 
-### 1️⃣ **基础版 (Basic)** - 无优化
+### ⚡ 二进制性能测试
+| 脚本 | 传输方式 | 优化级别 | 用途 |
+|------|----------|----------|------|
+| `binary-performance-publisher.sh` | UDP | 标准 | 跨机器发布者 |
+| `binary-performance-subscriber.sh` | UDP | 标准 | 跨机器订阅者 |
+| `binary-performance-publisher-ipc.sh` | IPC | 极致 | 本机发布者 |
+| `binary-performance-subscriber-ipc.sh` | IPC | 极致 | 本机订阅者 |
+| `*-udp-optimized.sh` | UDP | 高性能 | 优化版跨机器测试 |
+
+### 🔧 RPC 服务测试
+| 脚本 | 传输方式 | 功能 |
+|------|----------|------|
+| `aeron-rpc-server.sh` | UDP | RPC服务器 |
+| `aeron-rpc-test.sh` | UDP | RPC客户端测试 |
+| `aeron-rpc-server-ipc.sh` | IPC | 本机RPC服务器 |
+| `aeron-rpc-test-ipc.sh` | IPC | 本机RPC测试 |
+
+### 🛠️ 系统工具
+| 脚本 | 功能 | 说明 |
+|------|------|------|
+| `linux-system.sh` | 系统优化 | CPU绑定、网络优化等 |
+| `download-aeron.sh` | 依赖下载 | 获取Aeron JAR包 |
+
+## 🚀 快速开始
+
+### 1. 本机IPC测试 (极致性能)
 ```bash
-./start-mediadriver.sh                    # 启动基础MediaDriver
-./binary-performance-subscriber.sh        # 启动基础订阅者
-./binary-performance-publisher.sh         # 启动基础发布者
-```
-**特点**：
-- ✅ 无需特殊权限
-- ✅ 兼容性最好
-- ⚡ 性能：一般
-- 🎯 **适用场景**：开发测试、兼容性验证
+# 启动MediaDriver
+./start-mediadriver.sh
 
-### 2️⃣ **中等优化 (Moderate)** - 平衡性能与稳定性
-```bash
-./moderate-start-mediadriver.sh           # 启动中等优化MediaDriver
-./moderate-binary-performance-subscriber.sh # 启动中等优化订阅者
-./moderate-binary-performance-publisher.sh  # 启动中等优化发布者
+# 终端1: 启动IPC订阅者
+./binary-performance-subscriber-ipc.sh
+
+# 终端2: 启动IPC发布者
+./binary-performance-publisher-ipc.sh
 ```
-**特点**：
-- ✅ 无需sudo权限
+
+### 2. 跨机器UDP测试
+```bash
+# 机器A (192.168.0.106) - Publisher
+./start-mediadriver.sh
+./binary-performance-publisher.sh -transport NETWORK_UDP -bind 192.168.0.127
+
+# 机器B (192.168.0.127) - Subscriber  
+./start-mediadriver.sh
+./binary-performance-subscriber.sh -transport NETWORK_UDP -connect 192.168.0.106
+```
+
+### 3. 系统性能优化
+```bash
+# 应用系统优化 (需要root权限)
+sudo ./linux-system.sh
+
+# 查看优化状态
+./linux-system.sh status
+```
+
+## 📊 性能参数
+
+### 支持的传输模式
+- **IPC**: 本机进程间通信，延迟 < 1μs
+- **UDP**: 跨机器网络传输，延迟通常 10-100μs  
+- **NETWORK_UDP**: 跨机器优化UDP，支持自定义IP
+
+### 常用测试参数
+```bash
+# 消息数量和大小
+-count 1000000    # 发送100万条消息
+-size 64          # 消息大小64字节
+
+# 网络配置
+-bind <IP>        # Publisher绑定IP
+-connect <IP>     # Subscriber连接IP
+```
+
+## ⚠️ 注意事项
+
+- **权限**: 确保脚本可执行 `chmod +x *.sh`
+- **Java**: 需要Java 11+环境
+- **网络**: 跨机器测试需要网络互通
+- **时间同步**: 建议使用chrony进行时间同步
+- **防火墙**: 确保端口20121开放
+
+## 🔍 故障排除
+
+### MediaDriver无法启动
+```bash
+# 检查进程
+ps aux | grep MediaDriver
+# 清理资源
+./stop-mediadriver.sh
+```
+
+### 跨机器连接失败
+```bash
+# 检查网络连通性
+ping <目标IP>
+# 检查端口
+telnet <目标IP> 20121
+```
+
+更多详细配置请参考上级目录的主README.md文档。
 - ⚡ G1GC + 内存优化
 - ⚡ 合理的JVM参数
 - 🎯 **适用场景**：生产环境、日常性能测试（推荐）
