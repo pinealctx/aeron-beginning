@@ -28,19 +28,6 @@
             <artifactId>HdrHistogram</artifactId>
             <version>2.1.12</version>
         </dependency>
-        
-        <!-- JNA for native system calls -->
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna</artifactId>
-            <version>5.13.0</version>
-        </dependency>
-        
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna-platform</artifactId>
-            <version>5.13.0</version>
-        </dependency>
     </dependencies>
 
     <build>
