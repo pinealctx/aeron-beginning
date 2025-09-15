@@ -132,10 +132,10 @@ public class BinaryPerformanceSubscriber {
             final long latency = receiveTime - sendTime;
             
             // 调试异常延迟（仅前几条消息）
-            if (messageCount < 5 || latency < 0 || latency > 10_000_000_000L) { // 10秒以上
+            /*if (messageCount < 5 || latency < 0 || latency > 10_000_000_000L) { // 10秒以上
                 System.out.printf("消息#%d: 发送时间=%d, 接收时间=%d, 延迟=%d ns (%.3f ms)\n", 
                                 messageCount + 1, sendTime, receiveTime, latency, latency / 1_000_000.0);
-            }
+            }*/
                         
             // 更新统计信息
             updateStatistics(receiveTime, latency);
