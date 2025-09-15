@@ -5,7 +5,7 @@ import io.aeron.Subscription;
 import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
 import org.agrona.DirectBuffer;
-import org.HdrHistogram.Histogram;
+import io.aeron.shadow.org.HdrHistogram.Histogram;
 
 /**
  * 高性能二进制消息订阅者

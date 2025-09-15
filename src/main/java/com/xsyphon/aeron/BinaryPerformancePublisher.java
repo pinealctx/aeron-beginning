@@ -4,7 +4,7 @@ import io.aeron.Aeron;
 import io.aeron.Publication;
 import org.agrona.BufferUtil;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.HdrHistogram.Histogram;
+import io.aeron.shadow.org.HdrHistogram.Histogram;
 
 /**
  * 高性能二进制消息发布者
