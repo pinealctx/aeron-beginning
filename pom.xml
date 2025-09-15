@@ -21,6 +21,13 @@
             <artifactId>aeron-all</artifactId>
             <version>${aeron.version}</version>
         </dependency>
+        
+        <!-- HdrHistogram for precise latency percentile statistics -->
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>2.1.12</version>
+        </dependency>
     </dependencies>
 
     <build>

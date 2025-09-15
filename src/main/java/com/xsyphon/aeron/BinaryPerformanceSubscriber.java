@@ -5,6 +5,7 @@ import io.aeron.Subscription;
 import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
 import org.agrona.DirectBuffer;
+import org.HdrHistogram.Histogram;
 
 /**
  * 高性能二进制消息订阅者
@@ -43,6 +44,10 @@ public class BinaryPerformanceSubscriber {
     private static int messageSize = 0;
     private static boolean testCompleted = false;
     private static long targetMessageCount = DEFAULT_TARGET_MESSAGE_COUNT;
+    
+    // HdrHistogram用于精确的延迟分布统计
+    // 最高值1秒(1,000,000μs)，精度到1μs，3位有效数字
+    private static final Histogram latencyHistogram = new Histogram(1_000_000L, 3);
 
     public static void main(String[] args) {
         // 解析命令行参数
@@ -124,6 +129,10 @@ public class BinaryPerformanceSubscriber {
         if (latency < minLatency) {
             minLatency = latency;
         }
+        
+        // 记录到HdrHistogram (转换为微秒)
+        final long latencyUs = latency / 1000L;
+        latencyHistogram.recordValue(latencyUs);
         
         // 检查是否达到目标消息数量
         if (messageCount >= targetMessageCount) {
@@ -237,17 +246,39 @@ public class BinaryPerformanceSubscriber {
         System.out.printf("  最大延迟: %.2f μs\n", maxLatencyUs);
         System.out.println();
         
+        // 添加百分位延迟统计
+        System.out.printf("📊 延迟分布 (百分位统计):\n");
+        System.out.printf("  50th percentile (中位数): %d μs\n", latencyHistogram.getValueAtPercentile(50.0));
+        System.out.printf("  90th percentile: %d μs\n", latencyHistogram.getValueAtPercentile(90.0));
+        System.out.printf("  95th percentile: %d μs\n", latencyHistogram.getValueAtPercentile(95.0));
+        System.out.printf("  99th percentile: %d μs\n", latencyHistogram.getValueAtPercentile(99.0));
+        System.out.printf("  99.9th percentile: %d μs\n", latencyHistogram.getValueAtPercentile(99.9));
+        System.out.printf("  99.99th percentile: %d μs\n", latencyHistogram.getValueAtPercentile(99.99));
+        System.out.println();
+        
+        // 延迟分布区间统计
+        System.out.printf("📈 延迟分布区间:\n");
+        final long[] thresholds = {1, 5, 10, 20, 50, 100, 500, 1000}; // 微秒
+        for (long threshold : thresholds) {
+            double percentage = latencyHistogram.getPercentileAtOrBelowValue(threshold);
+            System.out.printf("  ≤ %d μs: %.2f%%\n", threshold, percentage);
+        }
+        System.out.println();
+        
         // 性能评估
-        if (avgLatencyUs < 1) {
-            System.out.println("🚀 延迟评估: 超低延迟 (< 1μs) - 完美适合超高频交易!");
-        } else if (avgLatencyUs < 5) {
-            System.out.println("⚡ 延迟评估: 优秀 (< 5μs) - 适合高频交易!");
-        } else if (avgLatencyUs < 20) {
-            System.out.println("✅ 延迟评估: 良好 (< 20μs) - 适合中频交易!");
-        } else if (avgLatencyUs < 100) {
-            System.out.println("⚠️ 延迟评估: 可接受 (< 100μs) - 需要优化!");
+        final double p99 = latencyHistogram.getValueAtPercentile(99.0);
+        final double p90 = latencyHistogram.getValueAtPercentile(90.0);
+        
+        if (p99 < 1) {
+            System.out.println("🚀 延迟评估: 超低延迟 (P99 < 1μs) - 完美适合超高频交易!");
+        } else if (p99 < 5) {
+            System.out.println("⚡ 延迟评估: 优秀 (P99 < 5μs) - 适合高频交易!");
+        } else if (p99 < 20) {
+            System.out.println("✅ 延迟评估: 良好 (P99 < 20μs) - 适合中频交易!");
+        } else if (p99 < 100) {
+            System.out.println("⚠️ 延迟评估: 可接受 (P99 < 100μs) - 需要优化!");
         } else {
-            System.out.println("❌ 延迟评估: 较高 (>= 100μs) - 急需优化!");
+            System.out.println("❌ 延迟评估: 较高 (P99 >= 100μs) - 急需优化!");
         }
         
         if (messagesPerSecond > 10_000_000) {
@@ -258,6 +289,12 @@ public class BinaryPerformanceSubscriber {
             System.out.println("✅ 吞吐量评估: 良好 (> 100万/秒)!");
         } else {
             System.out.println("⚠️ 吞吐量评估: 需要优化!");
+        }
+        
+        // 输出详细的HdrHistogram报告（可选）
+        if (finalCount > 10000) { // 只有大量数据时才输出
+            System.out.println("\n📋 HdrHistogram 详细统计:");
+            latencyHistogram.outputPercentileDistribution(System.out, 1.0);
         }
         
         System.out.println("\n测试完成! 🎉");

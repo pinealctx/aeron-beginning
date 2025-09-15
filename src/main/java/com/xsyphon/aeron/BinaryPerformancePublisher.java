@@ -4,6 +4,7 @@ import io.aeron.Aeron;
 import io.aeron.Publication;
 import org.agrona.BufferUtil;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.HdrHistogram.Histogram;
 
 /**
  * 高性能二进制消息发布者
@@ -75,32 +76,69 @@ public class BinaryPerformancePublisher {
     private static void performanceTest(Publication publication, UnsafeBuffer buffer, Config config) {
         final long startTime = System.nanoTime();
         int successCount = 0;
+        int backPressureCount = 0;
+        int retryCount = 0;
+        
+        // 发送延迟统计
+        long minSendLatencyUs = Long.MAX_VALUE;
+        long maxSendLatencyUs = 0;
+        long totalSendLatencyUs = 0;
+        
+        // HdrHistogram用于统计发送延迟 (微秒级别)
+        final Histogram sendLatencyHistogram = new Histogram(1_000_000L, 3); // 最高1秒，3位精度
         
         for (int i = 0; i < config.messageCount; i++) {
-            final long sendTime = System.nanoTime();
+            final long messageStartTime = System.nanoTime();
             
-            // 创建二进制消息
-            createBinaryMessage(buffer, 1, i, sendTime, config.messageSize);
+            // 创建二进制消息 (使用消息开始时间作为时间戳)
+            createBinaryMessage(buffer, 1, i, messageStartTime, config.messageSize);
             
+            final long offerStartTime = System.nanoTime();
             long result;
+            int messageRetries = 0;
+            
             while ((result = publication.offer(buffer, 0, config.messageSize)) < 0) {
+                messageRetries++;
                 if (result == Publication.BACK_PRESSURED) {
+                    backPressureCount++;
                     Thread.onSpinWait();
                 } else if (result == Publication.NOT_CONNECTED) {
                     System.err.println("连接丢失!");
+                    printSendStatistics(config, successCount, backPressureCount, retryCount, 
+                                      System.nanoTime() - startTime, sendLatencyHistogram,
+                                      minSendLatencyUs, maxSendLatencyUs, totalSendLatencyUs);
                     return;
                 } else {
                     Thread.onSpinWait();
                 }
             }
+            
+            final long offerEndTime = System.nanoTime();
+            final long sendLatencyNs = offerEndTime - offerStartTime;
+            final long sendLatencyUs = sendLatencyNs / 1000L;
+            
+            // 更新发送延迟统计
+            totalSendLatencyUs += sendLatencyUs;
+            if (sendLatencyUs < minSendLatencyUs) {
+                minSendLatencyUs = sendLatencyUs;
+            }
+            if (sendLatencyUs > maxSendLatencyUs) {
+                maxSendLatencyUs = sendLatencyUs;
+            }
+            
+            // 记录发送延迟到histogram
+            sendLatencyHistogram.recordValue(sendLatencyUs);
+            
             successCount++;
+            retryCount += messageRetries;
         }
         
         final long endTime = System.nanoTime();
         final long totalTimeNs = endTime - startTime;
         
         // 输出统计信息
-        printStatistics(config, successCount, totalTimeNs);
+        printSendStatistics(config, successCount, backPressureCount, retryCount, totalTimeNs, 
+                           sendLatencyHistogram, minSendLatencyUs, maxSendLatencyUs, totalSendLatencyUs);
     }
     
     /**
@@ -118,31 +156,99 @@ public class BinaryPerformancePublisher {
         }
     }
     
-    private static void printStatistics(Config config, int successCount, long totalTimeNs) {
+    private static void printSendStatistics(Config config, int successCount, int backPressureCount, 
+                                           int retryCount, long totalTimeNs, Histogram sendLatencyHistogram,
+                                           long minSendLatencyUs, long maxSendLatencyUs, long totalSendLatencyUs) {
         final double totalTimeMs = totalTimeNs / 1_000_000.0;
         final double totalTimeSec = totalTimeMs / 1000.0;
         final double messagesPerSecond = successCount / totalTimeSec;
         final double throughputMBps = (messagesPerSecond * config.messageSize) / (1024 * 1024);
         
-        System.out.println("\n=== 发布者性能统计 ===");
-        System.out.printf("测试时长: %.2f 秒\n", totalTimeSec);
-        System.out.printf("成功发送: %d 条消息\n", successCount);
+        System.out.println("\n=== 📊 发布者性能统计报告 ===");
+        System.out.printf("测试时长: %.3f 秒\n", totalTimeSec);
+        System.out.printf("成功发送: %,d 条消息\n", successCount);
         System.out.printf("消息大小: %d bytes\n", config.messageSize);
+        System.out.printf("背压次数: %,d 次\n", backPressureCount);
+        System.out.printf("重试总数: %,d 次\n", retryCount);
+        System.out.printf("平均重试: %.2f 次/消息\n", retryCount / (double) successCount);
         System.out.println();
-        System.out.printf("发送吞吐量: %.0f msg/sec\n", messagesPerSecond);
-        System.out.printf("发送吞吐量: %.2f MB/sec\n", throughputMBps);
+        
+        System.out.printf("📈 发送吞吐量性能:\n");
+        System.out.printf("  消息吞吐量: %,.0f msg/sec\n", messagesPerSecond);
+        System.out.printf("  数据吞吐量: %.2f MB/sec\n", throughputMBps);
         System.out.println();
-        System.out.println("注意: 端到端延迟请查看订阅者统计结果");
+        
+        System.out.printf("⚡ 发送延迟统计 (offer调用耗时):\n");
+        System.out.printf("  平均发送延迟: %.2f μs\n", (double) totalSendLatencyUs / successCount);
+        System.out.printf("  最小发送延迟: %d μs\n", minSendLatencyUs);
+        System.out.printf("  最大发送延迟: %d μs\n", maxSendLatencyUs);
+        System.out.println();
+        
+        System.out.printf("📊 发送延迟分布 (百分位统计):\n");
+        System.out.printf("  50th percentile (中位数): %d μs\n", sendLatencyHistogram.getValueAtPercentile(50.0));
+        System.out.printf("  90th percentile: %d μs\n", sendLatencyHistogram.getValueAtPercentile(90.0));
+        System.out.printf("  95th percentile: %d μs\n", sendLatencyHistogram.getValueAtPercentile(95.0));
+        System.out.printf("  99th percentile: %d μs\n", sendLatencyHistogram.getValueAtPercentile(99.0));
+        System.out.printf("  99.9th percentile: %d μs\n", sendLatencyHistogram.getValueAtPercentile(99.9));
+        System.out.printf("  99.99th percentile: %d μs\n", sendLatencyHistogram.getValueAtPercentile(99.99));
+        System.out.println();
+        
+        // 发送延迟分布区间统计
+        System.out.printf("📈 发送延迟分布区间:\n");
+        final long[] thresholds = {1, 5, 10, 20, 50, 100, 500, 1000}; // 微秒
+        for (long threshold : thresholds) {
+            double percentage = sendLatencyHistogram.getPercentileAtOrBelowValue(threshold);
+            System.out.printf("  ≤ %d μs: %.2f%%\n", threshold, percentage);
+        }
+        System.out.println();
+        
+        // 性能评估
+        final double p99SendLatency = sendLatencyHistogram.getValueAtPercentile(99.0);
+        final double avgSendLatency = sendLatencyHistogram.getMean();
+        
+        System.out.printf("🎯 发送性能评估:\n");
         
         // 吞吐量分析
         if (messagesPerSecond > 5_000_000) {
-            System.out.println("🚀 发送性能: 超高吞吐量!");
+            System.out.println("🚀 发送吞吐量: 超高性能 (> 500万/秒)!");
         } else if (messagesPerSecond > 1_000_000) {
-            System.out.println("⚡ 发送性能: 百万级吞吐量!");
+            System.out.println("⚡ 发送吞吐量: 百万级性能!");
         } else if (messagesPerSecond > 500_000) {
-            System.out.println("✅ 发送性能: 50万+吞吐量!");
+            System.out.println("✅ 发送吞吐量: 50万+性能!");
         } else {
-            System.out.println("⚠️ 发送性能: 需要优化");
+            System.out.println("⚠️ 发送吞吐量: 需要优化");
+        }
+        
+        // 发送延迟分析
+        if (p99SendLatency < 1) {
+            System.out.println("🚀 发送延迟: 超低延迟 (P99 < 1μs) - 极致发送性能!");
+        } else if (p99SendLatency < 5) {
+            System.out.println("⚡ 发送延迟: 优秀 (P99 < 5μs) - 高效发送!");
+        } else if (p99SendLatency < 20) {
+            System.out.println("✅ 发送延迟: 良好 (P99 < 20μs) - 稳定发送!");
+        } else if (p99SendLatency < 100) {
+            System.out.println("⚠️ 发送延迟: 可接受 (P99 < 100μs) - 可优化!");
+        } else {
+            System.out.println("❌ 发送延迟: 较高 (P99 >= 100μs) - 需要优化!");
+        }
+        
+        // 背压分析
+        final double backPressureRate = backPressureCount / (double) successCount;
+        if (backPressureRate < 0.01) {
+            System.out.println("✅ 背压控制: 极少背压 (< 1%) - 发送流畅!");
+        } else if (backPressureRate < 0.1) {
+            System.out.println("⚠️ 背压控制: 中等背压 (< 10%) - 可接受!");
+        } else {
+            System.out.println("❌ 背压控制: 频繁背压 (>= 10%) - 需要优化!");
+        }
+        
+        System.out.println();
+        System.out.println("注意: 这是发送端统计，端到端延迟请查看订阅者统计结果");
+        
+        // 输出详细的HdrHistogram报告（可选）
+        if (successCount > 10000) { // 只有大量数据时才输出
+            System.out.println("\n📋 发送延迟 HdrHistogram 详细统计:");
+            sendLatencyHistogram.outputPercentileDistribution(System.out, 1.0);
         }
     }
     
