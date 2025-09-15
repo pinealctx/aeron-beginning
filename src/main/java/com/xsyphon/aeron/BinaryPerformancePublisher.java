@@ -15,16 +15,24 @@ public class BinaryPerformancePublisher {
     // 传输方式枚举
     public enum TransportType {
         UDP("aeron:udp?endpoint=localhost:20121"),
-        IPC("aeron:ipc?term-length=1048576");
+        IPC("aeron:ipc?term-length=1048576"),
+        NETWORK_UDP("aeron:udp?endpoint=%s:20121"); // 支持自定义IP的UDP
         
-        private final String channel;
+        private final String channelTemplate;
         
-        TransportType(String channel) {
-            this.channel = channel;
+        TransportType(String channelTemplate) {
+            this.channelTemplate = channelTemplate;
         }
         
         public String getChannel() {
-            return channel;
+            return channelTemplate;
+        }
+        
+        public String getChannel(String customEndpoint) {
+            if (this == NETWORK_UDP && customEndpoint != null) {
+                return String.format(channelTemplate, customEndpoint);
+            }
+            return channelTemplate;
         }
     }
     
@@ -41,14 +49,14 @@ public class BinaryPerformancePublisher {
         
         System.out.println("=== Aeron二进制高性能测试 - 发布者 ===");
         System.out.println("传输方式: " + config.transportType.name());
-        System.out.println("Channel: " + config.transportType.getChannel());
+        System.out.println("Channel: " + config.getEffectiveChannel());
         System.out.println("Stream ID: " + STREAM_ID);
         System.out.println("消息大小: " + config.messageSize + " bytes");
         System.out.println("测试消息数: " + config.messageCount);
         System.out.println();
 
         try (Aeron aeron = Aeron.connect();
-             Publication publication = aeron.addPublication(config.transportType.getChannel(), STREAM_ID)) {
+             Publication publication = aeron.addPublication(config.getEffectiveChannel(), STREAM_ID)) {
 
             // 创建消息缓冲区
             final UnsafeBuffer buffer = new UnsafeBuffer(BufferUtil.allocateDirectAligned(config.messageSize, 64));
@@ -273,10 +281,19 @@ public class BinaryPerformancePublisher {
                             config.transportType = TransportType.valueOf(args[++i].toUpperCase());
                         } catch (IllegalArgumentException e) {
                             System.err.println("错误: 无效的传输方式: " + args[i]);
-                            System.err.println("支持的传输方式: UDP, IPC");
+                            System.err.println("支持的传输方式: UDP, IPC, NETWORK_UDP");
                             printUsage();
                             System.exit(1);
                         }
+                    }
+                    break;
+                case "-bind":
+                case "-listen":
+                case "-endpoint":
+                case "-ip":
+                    if (i + 1 < args.length) {
+                        config.customEndpoint = args[++i];
+                        System.out.println("Publisher将绑定到: " + config.customEndpoint + ":20121");
                     }
                     break;
                 case "-help":
@@ -305,24 +322,45 @@ public class BinaryPerformancePublisher {
         System.out.println("选项:");
         System.out.println("  -size <bytes>         消息大小 (默认: " + DEFAULT_MESSAGE_SIZE + ")");
         System.out.println("  -count <num>          测试消息数 (默认: " + DEFAULT_MESSAGE_COUNT + ")");
-        System.out.println("  -transport <方式>     传输方式: UDP 或 IPC (默认: " + DEFAULT_TRANSPORT.name() + ")");
+        System.out.println("  -transport <方式>     传输方式: UDP, IPC 或 NETWORK_UDP (默认: " + DEFAULT_TRANSPORT.name() + ")");
+        System.out.println("  -bind <IP>            绑定到指定IP地址 (Publisher监听地址，默认localhost)");
+        System.out.println("  -listen <IP>          绑定到指定IP地址 (同 -bind)");
+        System.out.println("  -endpoint <IP>        绑定到指定IP地址 (同 -bind)");
+        System.out.println("  -ip <IP>              绑定到指定IP地址 (同 -bind)");
         System.out.println("  -help                 显示帮助信息");
         System.out.println();
         System.out.println("传输方式:");
-        System.out.println("  UDP    - 使用UDP网络传输 (适合跨网络测试)");
-        System.out.println("  IPC    - 使用进程间通信 (适合本机超低延迟测试)");
+        System.out.println("  UDP        - 使用UDP网络传输 (默认localhost，可用-bind指定IP)");
+        System.out.println("  IPC        - 使用进程间通信 (适合本机超低延迟测试)");
+        System.out.println("  NETWORK_UDP - 使用UDP网络传输到指定IP (需要-bind参数)");
         System.out.println();
         System.out.println("示例:");
-        System.out.println("  java BinaryPerformancePublisher                                      # 使用默认设置");
+        System.out.println("  # 本机测试:");
+        System.out.println("  java BinaryPerformancePublisher                                      # 使用默认设置(localhost)");
         System.out.println("  java BinaryPerformancePublisher -transport IPC                       # 使用IPC模式");
-        System.out.println("  java BinaryPerformancePublisher -count 10000000                      # 发送1000万条消息");
-        System.out.println("  java BinaryPerformancePublisher -transport IPC -count 50000000       # IPC模式，5000万条消息");
-        System.out.println("  java BinaryPerformancePublisher -size 128 -count 1000000             # 128字节消息，100万条");
+        System.out.println();
+        System.out.println("  # 跨机器测试 - Publisher端 (192.168.0.106):");
+        System.out.println("  java BinaryPerformancePublisher -bind 0.0.0.0                        # 监听所有网络接口");
+        System.out.println("  java BinaryPerformancePublisher -bind 192.168.0.106                  # 监听指定IP");
+        System.out.println("  java BinaryPerformancePublisher -bind 0.0.0.0 -count 10000000        # 高量测试");
+        System.out.println();
+        System.out.println("  注意: Publisher使用-bind指定监听地址，Subscriber使用-connect指定连接地址");
     }
     
     private static class Config {
         int messageSize = DEFAULT_MESSAGE_SIZE;
         int messageCount = DEFAULT_MESSAGE_COUNT;
         TransportType transportType = DEFAULT_TRANSPORT;
+        String customEndpoint = null; // 自定义端点IP地址
+        
+        public String getEffectiveChannel() {
+            if (transportType == TransportType.NETWORK_UDP && customEndpoint != null) {
+                return transportType.getChannel(customEndpoint);
+            } else if (transportType == TransportType.UDP && customEndpoint != null) {
+                // UDP模式下指定IP时，使用自定义地址
+                return "aeron:udp?endpoint=" + customEndpoint + ":20121";
+            }
+            return transportType.getChannel();
+        }
     }
 }

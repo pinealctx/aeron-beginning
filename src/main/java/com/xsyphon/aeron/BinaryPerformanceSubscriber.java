@@ -17,22 +17,41 @@ public class BinaryPerformanceSubscriber {
     // 传输方式枚举
     public enum TransportType {
         UDP("aeron:udp?endpoint=localhost:20121"),
-        IPC("aeron:ipc?term-length=1048576");
+        IPC("aeron:ipc?term-length=1048576"),
+        NETWORK_UDP("aeron:udp?endpoint=%s:20121"); // 支持自定义IP的UDP
         
-        private final String channel;
+        private final String channelTemplate;
         
-        TransportType(String channel) {
-            this.channel = channel;
+        TransportType(String channelTemplate) {
+            this.channelTemplate = channelTemplate;
         }
         
         public String getChannel() {
-            return channel;
+            return channelTemplate;
+        }
+        
+        public String getChannel(String customEndpoint) {
+            if (this == NETWORK_UDP && customEndpoint != null) {
+                return String.format(channelTemplate, customEndpoint);
+            }
+            return channelTemplate;
         }
     }
     
     private static final int STREAM_ID = 1001;
     private static final long DEFAULT_TARGET_MESSAGE_COUNT = 20_000_000L;  // 默认2000万条消息
     private static TransportType transportType = TransportType.UDP;  // 默认UDP
+    private static String customEndpoint = null; // 自定义端点IP地址 (Subscriber连接到Publisher的IP)
+    
+    private static String getEffectiveChannel() {
+        if (transportType == TransportType.NETWORK_UDP && customEndpoint != null) {
+            return transportType.getChannel(customEndpoint);
+        } else if (transportType == TransportType.UDP && customEndpoint != null) {
+            // UDP模式下指定IP时，连接到指定的Publisher地址
+            return "aeron:udp?endpoint=" + customEndpoint + ":20121";
+        }
+        return transportType.getChannel();
+    }
     
     // 统计信息 - 单线程处理，使用普通变量即可
     private static long messageCount = 0;
@@ -55,13 +74,13 @@ public class BinaryPerformanceSubscriber {
         
         System.out.println("=== Aeron二进制高性能测试 - 订阅者 ===");
         System.out.println("传输方式: " + transportType.name());
-        System.out.println("Channel: " + transportType.getChannel());
+        System.out.println("Channel: " + getEffectiveChannel());
         System.out.println("Stream ID: " + STREAM_ID);
         System.out.printf("目标消息数: %,d 条\n", targetMessageCount);
         System.out.println("等待消息...\n");
 
         try (Aeron aeron = Aeron.connect();
-             Subscription subscription = aeron.addSubscription(transportType.getChannel(), STREAM_ID)) {
+             Subscription subscription = aeron.addSubscription(getEffectiveChannel(), STREAM_ID)) {
 
             final BinaryMessageHandler messageHandler = new BinaryMessageHandler();
             
@@ -176,12 +195,28 @@ public class BinaryPerformanceSubscriber {
                             i++; // 跳过参数值
                         } catch (IllegalArgumentException e) {
                             System.err.println("错误: 无效的传输方式: " + args[i + 1]);
-                            System.err.println("支持的传输方式: UDP, IPC");
+                            System.err.println("支持的传输方式: UDP, IPC, NETWORK_UDP");
                             printUsage();
                             System.exit(1);
                         }
                     } else {
                         System.err.println("错误: -transport 参数需要指定传输方式");
+                        printUsage();
+                        System.exit(1);
+                    }
+                    break;
+                case "-connect":
+                case "--connect":
+                case "-endpoint":
+                case "--endpoint":
+                case "-ip":
+                case "--ip":
+                    if (i + 1 < args.length) {
+                        customEndpoint = args[i + 1];
+                        System.out.println("Subscriber将连接到: " + customEndpoint + ":20121");
+                        i++; // 跳过参数值
+                    } else {
+                        System.err.println("错误: " + args[i] + " 参数需要指定Publisher的IP地址");
                         printUsage();
                         System.exit(1);
                     }
@@ -207,12 +242,16 @@ public class BinaryPerformanceSubscriber {
         System.out.println();
         System.out.println("选项:");
         System.out.println("  -count, --count <数量>      目标消息数量 (默认: " + String.format("%,d", DEFAULT_TARGET_MESSAGE_COUNT) + ")");
-        System.out.println("  -transport <方式>           传输方式: UDP 或 IPC (默认: UDP)");
+        System.out.println("  -transport <方式>           传输方式: UDP, IPC 或 NETWORK_UDP (默认: UDP)");
+        System.out.println("  -connect <IP>               连接到Publisher的IP地址 (跨机器测试时必需)");
+        System.out.println("  -endpoint <IP>              连接到Publisher的IP地址 (同 -connect)");
+        System.out.println("  -ip <IP>                    连接到Publisher的IP地址 (同 -connect)");
         System.out.println("  -h, --help                  显示此帮助信息");
         System.out.println();
         System.out.println("传输方式:");
-        System.out.println("  UDP    - 使用UDP网络传输 (适合跨网络测试)");
-        System.out.println("  IPC    - 使用进程间通信 (适合本机超低延迟测试)");
+        System.out.println("  UDP        - 使用UDP网络传输 (默认连接localhost，可用-connect指定Publisher IP)");
+        System.out.println("  IPC        - 使用进程间通信 (适合本机超低延迟测试)");
+        System.out.println("  NETWORK_UDP - 使用UDP网络传输连接指定IP (需要-connect参数)");
         System.out.println();
         System.out.println("示例:");
         System.out.println("  java BinaryPerformanceSubscriber                              # 使用默认UDP模式");
