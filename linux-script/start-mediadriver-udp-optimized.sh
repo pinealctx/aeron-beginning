@@ -34,7 +34,7 @@ echo "   - MTU: 8KB"
 echo ""
 
 # UDP优化版MediaDriver - 匹配客户端配置
-nice -n -10 java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
+java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
     -Xms2G -Xmx2G \
     -XX:+UseG1GC \
     -XX:MaxGCPauseMillis=5 \
