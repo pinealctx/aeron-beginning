@@ -21,6 +21,13 @@
             <artifactId>aeron-all</artifactId>
             <version>${aeron.version}</version>
         </dependency>
+        
+        <!-- TimeX JNI 高性能时间戳库 -->
+        <dependency>
+            <groupId>com.xsyphon</groupId>
+            <artifactId>javaext</artifactId>
+            <version>1.2.3</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -65,6 +72,8 @@
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <!-- 包含系统依赖 -->
+                            <includeSystemScope>true</includeSystemScope>
                             <!-- 处理重叠资源，避免MANIFEST.MF冲突 -->
                             <filters>
                                 <filter>
