@@ -1,10 +1,11 @@
 package com.xsyphon.aeron;
 
+import com.xsyphon.javaext.TimeX;
 import io.aeron.Aeron;
 import io.aeron.Publication;
+import io.aeron.shadow.org.HdrHistogram.Histogram;
 import org.agrona.BufferUtil;
 import org.agrona.concurrent.UnsafeBuffer;
-import io.aeron.shadow.org.HdrHistogram.Histogram;
 
 /**
  * 高性能二进制消息发布者
@@ -55,6 +56,17 @@ public class BinaryPerformancePublisher {
         System.out.println("测试消息数: " + config.messageCount);
         System.out.println();
 
+        // TimeX JNI 预热
+        System.out.println("🔥 TimeX JNI 预热中...");
+        long warmupStart = System.nanoTime();
+        for (int i = 0; i < 10000; i++) {
+            TimeX.unixNanoJNI();
+        }
+        long warmupEnd = System.nanoTime();
+        System.out.printf("✅ JNI 预热完成: 10,000次调用耗时 %.2f ms\n", 
+                         (warmupEnd - warmupStart) / 1_000_000.0);
+        System.out.println();
+
         try (Aeron aeron = Aeron.connect();
              Publication publication = aeron.addPublication(config.getEffectiveChannel(), STREAM_ID)) {
 
@@ -82,7 +94,7 @@ public class BinaryPerformancePublisher {
     }
     
     private static void performanceTest(Publication publication, UnsafeBuffer buffer, Config config) {
-        final long startTime = System.nanoTime();
+        final long startTime = TimeX.unixNanoJNI();
         int successCount = 0;
         int backPressureCount = 0;
         int retryCount = 0;
@@ -96,12 +108,12 @@ public class BinaryPerformancePublisher {
         final Histogram sendLatencyHistogram = new Histogram(1_000_000L, 3); // 最高1秒，3位精度
         
         for (int i = 0; i < config.messageCount; i++) {
-            final long messageStartTime = System.nanoTime();
+            final long messageStartTime = TimeX.unixNanoJNI();
             
             // 创建二进制消息 (使用消息开始时间作为时间戳)
             createBinaryMessage(buffer, 1, i, messageStartTime, config.messageSize);
             
-            final long offerStartTime = System.nanoTime();
+            final long offerStartTime = TimeX.unixNanoJNI();
             long result;
             int messageRetries = 0;
             
@@ -113,7 +125,7 @@ public class BinaryPerformancePublisher {
                 } else if (result == Publication.NOT_CONNECTED) {
                     System.err.println("连接丢失!");
                     printSendStatistics(config, successCount, backPressureCount, retryCount, 
-                                      System.nanoTime() - startTime, sendLatencyHistogram,
+                                      TimeX.unixNanoJNI() - startTime, sendLatencyHistogram,
                                       minSendLatencyUs, maxSendLatencyUs, totalSendLatencyUs);
                     return;
                 } else {
@@ -121,7 +133,7 @@ public class BinaryPerformancePublisher {
                 }
             }
             
-            final long offerEndTime = System.nanoTime();
+            final long offerEndTime = TimeX.unixNanoJNI();
             final long sendLatencyNs = offerEndTime - offerStartTime;
             final long sendLatencyUs = sendLatencyNs / 1000L;
             
@@ -141,7 +153,7 @@ public class BinaryPerformancePublisher {
             retryCount += messageRetries;
         }
         
-        final long endTime = System.nanoTime();
+        final long endTime = TimeX.unixNanoJNI();
         final long totalTimeNs = endTime - startTime;
         
         // 输出统计信息

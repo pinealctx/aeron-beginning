@@ -1,11 +1,12 @@
 package com.xsyphon.aeron;
 
+import com.xsyphon.javaext.TimeX;
 import io.aeron.Aeron;
 import io.aeron.Subscription;
 import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
-import org.agrona.DirectBuffer;
 import io.aeron.shadow.org.HdrHistogram.Histogram;
+import org.agrona.DirectBuffer;
 
 /**
  * 高性能二进制消息订阅者
@@ -81,6 +82,17 @@ public class BinaryPerformanceSubscriber {
         System.out.println("Channel: " + getEffectiveChannel());
         System.out.println("Stream ID: " + STREAM_ID);
         System.out.printf("目标消息数: %,d 条\n", targetMessageCount);
+        System.out.println();
+
+        // TimeX JNI 预热
+        System.out.println("🔥 TimeX JNI 预热中...");
+        long warmupStart = System.nanoTime();
+        for (int i = 0; i < 10000; i++) {
+            TimeX.unixNanoJNI();
+        }
+        long warmupEnd = System.nanoTime();
+        System.out.printf("✅ JNI 预热完成: 10,000次调用耗时 %.2f ms\n", 
+                         (warmupEnd - warmupStart) / 1_000_000.0);
         System.out.println("等待消息...\n");
 
         try (Aeron aeron = Aeron.connect();
@@ -113,7 +125,7 @@ public class BinaryPerformanceSubscriber {
     private static class BinaryMessageHandler implements FragmentHandler {
         @Override
         public void onFragment(DirectBuffer buffer, int offset, int length, Header header) {
-            final long receiveTime = System.nanoTime();
+            final long receiveTime = TimeX.unixNanoJNI();
             
             // 设置消息大小（第一次收到消息时）
             if (messageSize == 0) {
