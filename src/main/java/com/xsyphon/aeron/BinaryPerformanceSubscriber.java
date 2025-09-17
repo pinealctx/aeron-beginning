@@ -40,7 +40,7 @@ public class BinaryPerformanceSubscriber {
     }
     
     private static final int STREAM_ID = 1001;
-    private static final long DEFAULT_TARGET_MESSAGE_COUNT = 20_000_000L;  // 默认2000万条消息
+    private static final int DEFAULT_TARGET_MESSAGE_COUNT = 20_000_000;  // 默认2000万条消息
     private static TransportType transportType = TransportType.UDP;  // 默认UDP
     private static String customEndpoint = null; // 自定义端点IP地址 (Subscriber连接到Publisher的IP)
     
@@ -59,15 +59,28 @@ public class BinaryPerformanceSubscriber {
     }
     
     // 统计信息 - 单线程处理，使用普通变量即可
-    private static long messageCount = 0;
+    private static int messageSize = 0;
+    private static int messageCount = 0;
+    private static boolean testCompleted = false;
+    private static int targetMessageCount = DEFAULT_TARGET_MESSAGE_COUNT;
+
     private static long totalLatency = 0;
     private static long maxLatency = 0;
     private static long minLatency = Long.MAX_VALUE;
     private static long firstMessageTime = 0;
     private static long lastMessageTime = 0;
-    private static int messageSize = 0;
-    private static boolean testCompleted = false;
-    private static long targetMessageCount = DEFAULT_TARGET_MESSAGE_COUNT;
+    
+    // 最低延迟追踪变量
+    private static long minLatencyMessageIndex = 0;  // 第几条消息
+    private static long minLatencySendTime = 0;      // 发送时间戳(纳秒)
+    private static long minLatencyReceiveTime = 0;   // 接收时间戳(纳秒)
+
+    // 前1000条消息的发送时间
+    private static final long[] sendingTimeRecs = new long[1000];
+    // 前1000条消息的接收时间
+    private static final long[] receiveTimeRecs = new long[1000];
+    // 前1000条消息的延迟时间
+    private static final long[] latencyRecs = new long[1000];
     
     // HdrHistogram用于精确的延迟分布统计
     // 最高值10秒(10,000,000μs)，精度到1μs，3位有效数字
@@ -141,7 +154,7 @@ public class BinaryPerformanceSubscriber {
             
             // 解析大端时间戳
             final long sendTime = buffer.getLong(offset, java.nio.ByteOrder.BIG_ENDIAN);
-            final long latency = receiveTime - sendTime;
+            //final long latency = receiveTime - sendTime;
             
             // 调试异常延迟（仅前几条消息）
             /*if (messageCount < 5 || latency < 0 || latency > 10_000_000_000L) { // 10秒以上
@@ -150,16 +163,24 @@ public class BinaryPerformanceSubscriber {
             }*/
                         
             // 更新统计信息
-            updateStatistics(receiveTime, latency);
+            updateStatistics(receiveTime, sendTime);
         }
     }
     
-    private static void updateStatistics(long receiveTime, long latency) {
+    private static void updateStatistics(long receiveTime, long sendTime) {
         if (firstMessageTime == 0) {
             firstMessageTime = receiveTime;
         }
         lastMessageTime = receiveTime;
-        
+        long latency = receiveTime - sendTime;
+
+        // 记录发送和接收时间
+        if (messageCount < 1000) {
+            sendingTimeRecs[messageCount] = sendTime;
+            receiveTimeRecs[messageCount] = receiveTime;
+            latencyRecs[messageCount] = latency;
+        }
+
         messageCount++;
         
         // 更新统计
@@ -169,6 +190,10 @@ public class BinaryPerformanceSubscriber {
         }
         if (latency < minLatency) {
             minLatency = latency;
+            // 记录最低延迟的详细信息
+            minLatencyMessageIndex = messageCount;  // 当前是第几条消息
+            minLatencySendTime = sendTime;          // 发送时间戳
+            minLatencyReceiveTime = receiveTime;    // 接收时间戳
         }
         
         // 记录到HdrHistogram (转换为微秒)
@@ -197,7 +222,7 @@ public class BinaryPerformanceSubscriber {
                 case "--count":
                     if (i + 1 < args.length) {
                         try {
-                            targetMessageCount = Long.parseLong(args[i + 1]);
+                            targetMessageCount = Integer.parseInt(args[i + 1]);
                             if (targetMessageCount <= 0) {
                                 System.err.println("错误: 消息数量必须大于0");
                                 printUsage();
@@ -309,7 +334,11 @@ public class BinaryPerformanceSubscriber {
         System.out.println();
         System.out.printf("⚡ 端到端延迟统计 (receiveTime - sendTime):\n");
         System.out.printf("  平均延迟: %.2f μs\n", avgLatencyUs);
-        System.out.printf("  最小延迟: %.2f μs\n", minLatencyUs);
+        System.out.printf("  最小延迟: %.2f μs (消息#%d)\n", minLatencyUs, minLatencyMessageIndex);
+        System.out.printf("    发送时间: %d (%s.%06d)\n", minLatencySendTime, 
+                         new java.util.Date(minLatencySendTime / 1_000_000), (minLatencySendTime % 1_000_000));
+        System.out.printf("    接收时间: %d (%s.%06d)\n", minLatencyReceiveTime, 
+                         new java.util.Date(minLatencyReceiveTime / 1_000_000), (minLatencyReceiveTime % 1_000_000));
         System.out.printf("  最大延迟: %.2f μs\n", maxLatencyUs);
         System.out.println();
         
@@ -364,6 +393,13 @@ public class BinaryPerformanceSubscriber {
             latencyHistogram.outputPercentileDistribution(System.out, 1.0);
         }*/
         
+        // 打印前1000条消息的发送和接收时间
+        System.out.println("\n📋 前1000条消息的发送和接收时间:");
+        for (int i = 0; i < 1000; i++) {
+            System.out.printf("  消息 #%d: 发送时间: %d, 接收时间: %d, 延迟: %d\n",
+                    i, sendingTimeRecs[i], receiveTimeRecs[i], latencyRecs[i]);
+        }
+
         System.out.println("\n测试完成! 🎉");
     }
 }
