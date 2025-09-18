@@ -105,7 +105,8 @@ public class BinaryPerformancePublisher {
         long totalSendLatencyUs = 0;
         
         // HdrHistogram用于统计发送延迟 (微秒级别)
-        final Histogram sendLatencyHistogram = new Histogram(1_000_000L, 3); // 最高1秒，3位精度
+        // 扩大范围到10秒以支持C++ MediaDriver的异常高延迟调试
+        final Histogram sendLatencyHistogram = new Histogram(10_000_000L, 3); // 最高10秒，3位精度
         
         for (int i = 0; i < config.messageCount; i++) {
             final long messageStartTime = TimeX.unixNanoJNI();
